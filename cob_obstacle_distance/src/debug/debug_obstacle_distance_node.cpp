@@ -21,7 +21,7 @@
 #include <visualization_msgs/MarkerArray.h>
 #include "cob_control_msgs/ObstacleDistance.h"
 #include "cob_control_msgs/ObstacleDistances.h"
-
+#include <boost/format.hpp>
 class DebugObstacleDistance
 {
     ros::NodeHandle nh_;
