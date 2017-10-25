@@ -191,12 +191,9 @@ class MPC(object):
         print
         self.FK = Function('f', [self.x],[self.fk])
         self.Jacobian = Function('J', [self.x], [self.J])
-        self.Jac = Function('Jac', [self.x],[jacobian(self.fk,self.x)])
 
         print (self.Jacobian(self.join_state_))
         print self.kdl_kin.compute_jacobian(self.join_state_)
-        print 'jacobian casadi'
-        print self.Jac(self.join_state_)
 
         self.rate = 10
         rospy.loginfo("MPC Initialized...")
@@ -206,39 +203,54 @@ class MPC(object):
         pos_c =  self.fk[0:3,3]
         pos_ref = [ref.x,ref.y,ref.z]
         e=pos_ref-pos_c
-        #print 'Objective term'
+        print e
+        #print 'quadratic error'
         L = dot(e,e)
+        #print 'Integrator...'
         I = self.create_integrator(L)
 
-        #print 'Evaluate at a test point'
-        #Fk = F(x0=self.join_state_, p=[0,0,0,0,0,0,0])
-        print 'All controls'
-        U = MX.sym("U",7)
-        print 'Construct graph of integrator calls'
-        X = self.join_state_ # Initial state
-        J = 0
+        #print 'Start with an empty NLP'
         w = []
+        w0 = []
+        lbw = []
+        ubw = []
+        J = 0
+        g = []
+        lbg = []
+        ubg = []
+
+        # Formulate the NLP
+        Xk = MX(self.join_state_)
+
         for k in range(5):
-            # New NLP variable for the control
+            #print 'New NLP variable for the control'
             Uk = MX.sym('U_' + str(k))
             w += [Uk]
-            Ik = I(x0=X, p=Uk)
-            X = Ik['xf']
-            J += Ik['qf']
-            print 'Sum up quadratures'
+            lbw += [-3]
+            ubw += [3]
+            w0 += [0]
 
-        print 'Allocate an NLP solver'
-        print J
-        nlp = {'x': vertcat(*w), 'f': J, 'g': X}
+            #print 'Integrate till the end of the interval'
+            Ik = I(x0=Xk, p=Uk)
+            Xk = Ik['xf']
+            J = J + Ik['qf']
 
-        solver = nlpsol("solver", "ipopt", nlp, self.opts)
+            #print 'Add inequality constraint'
+            g += [Xk[0]]
+            lbg += [-3]
+            ubg += [3]
+
+        print vertcat(*g)
+        print 'Create an NLP solver'
+        prob = {'f': J, 'x': vertcat(*w), 'g': vertcat(*g)}
+        solver = nlpsol('solver', 'ipopt', prob);
 
         print 'Pass bounds, initial guess and solve NLP'
-        sol = solver(lbx=self.kdl_kin.joint_limits_lower,  # Lower variable bound
-                     ubx=self.kdl_kin.joint_limits_upper,  # Upper variable bound
-                     lbg=self.kdl_kin.joint_limits_lower,  # Lower constraint bound
-                     ubg=self.kdl_kin.joint_limits_upper,  # Upper constraint bound
-                     x0=self.join_state_)  # Initial guess
+        sol = solver(lbx=lbw,  # Lower variable bound
+                     ubx=ubw,  # Upper variable bound
+                     lbg=lbg,  # Lower constraint bound
+                     ubg=ubg,  # Upper constraint bound
+                     x0=w0)  # Initial guess
         w_opt = sol['x']
 
         return w_opt
